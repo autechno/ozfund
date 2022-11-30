@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: auTech;
 pragma solidity ^0.8.7;
 
-import "library/SafeMath.sol"
-import "library/BEP20.sol"
+
+import "library/SafeMath.sol";
+import "library/BEP20.sol";
 
 contract OZCoinToken {
 
@@ -51,21 +52,21 @@ contract OZCoinToken {
         uint256 deadline;
     }
 
-    function hashPermit(Permit memory permit) private view returns (bytes32){ 
+    function hashPermit(Permit memory permit) private view returns (bytes32){
         return keccak256(
             abi.encodePacked(
                 '\x19\x01',
                 DOMAIN_SEPARATOR,
                 keccak256(abi.encode(
                     keccak256('Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)'),
-                    permit.owner, 
-                    permit.spender, 
-                    permit.value, 
-                    permit.nonce, 
+                    permit.owner,
+                    permit.spender,
+                    permit.value,
+                    permit.nonce,
                     permit.deadline
                     ))
             )
-        ); 
+        );
     }
 
     modifier onlyMultiSign() {
@@ -73,7 +74,7 @@ contract OZCoinToken {
         _;
     }
 
-    function freezeAddress(address addr) external returns (bool) {
+    function freezeAddress(address addr) onlyMultiSign external returns (bool) {
         isFreeze[addr] = true;
         emit Freeze(addr);
         return true;
@@ -100,13 +101,13 @@ contract OZCoinToken {
         address _from = 0x0000000000000000000000000000000000000000;
         balances[spender] = balances[spender].add(_value);
         _totalSupply = _totalSupply.add(_value);
-        emit Transfer(_from, spender, _value);  
+        emit Transfer(_from, spender, _value);
         return true;
     }
 
     //销币
     function burn(address owner,uint _value) private returns (bool success) {
-        require(_value <= balances[owner],"Insufficient funds");     
+        require(_value <= balances[owner],"Insufficient funds");
         balances[owner] = balances[owner].sub(_value);
         _totalSupply = _totalSupply.sub(_value);
         emit Burn(owner, _value);
@@ -118,13 +119,14 @@ contract OZCoinToken {
     }
 
     function doTransfer(address _from, address _to, uint _value) private {
+        require(_from != _to);
         uint fromBalance = balances[_from];
         uint toBalance = balances[_to];
         require(!isFreeze[_from],"Been frozen");
         require(fromBalance >= _value, "Insufficient funds");
         balances[_from] = fromBalance.sub(_value);
-        balances[_to] = toBalance.add(_value);      
-        emit Transfer(_from, _to, _value);  
+        balances[_to] = toBalance.add(_value);
+        emit Transfer(_from, _to, _value);
     }
 
     function doApprove(address owner,address _spender,uint _value) private {
@@ -175,7 +177,7 @@ contract OZCoinToken {
         address recoveredAddress = ecrecover(digest, v, r, s);
         require(recoveredAddress != address(0) && recoveredAddress == permit.owner, "Invalid Signature");
         doApprove(permit.owner, permit.spender, permit.value);
-    } 
+    }
 
     function allowSupportedAddress(address contractAddress) onlyMultiSign external returns(bool) {
         supportedContractAddress[contractAddress] = 1;
@@ -233,7 +235,7 @@ contract OZCoinToken {
             exAmount = amount.mul(proportion);
         }
         burn(owner,amount);
-        IBEP20(contractAddress).transfer(spender,exAmount);        
+        IBEP20(contractAddress).transfer(spender,exAmount);
     }
 
     function withdrawToken(address contractAddress,address spender,uint amount) onlyMultiSign external {
@@ -241,8 +243,6 @@ contract OZCoinToken {
     }
 
     constructor (address multiSignWalletAddress) {
-        address BUSDAddress = address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56);
-        supportedContractAddress[BUSDAddress] = 1;
         contractOwner = msg.sender;
         multiSignWallet = multiSignWalletAddress;
         uint chainId;

@@ -89,6 +89,8 @@ contract OZCoinStake {
 
     address multiSignWallet;
 
+    event AccountStakeExpirationTimestampChange(address accountAddress, uint serialNumber, uint before, uint after);
+
     modifier onlyMultiSign() {
         require(msg.sender == multiSignWallet,"Forbidden");
         _;
@@ -118,7 +120,7 @@ contract OZCoinStake {
         return countAccounts[openSettleCount][index];
     }
 
-    function openAccount(address accountAddress,uint stakeAmount) public returns (bool) {
+    function openAccount(address accountAddress,uint stakeAmount) private returns (bool) {
         uint serialNumber = accountSerialNumber[accountAddress].add(1);
         accountSerialNumber[accountAddress] = serialNumber;
         uint nowTimestamp = block.timestamp;
@@ -140,8 +142,8 @@ contract OZCoinStake {
         countStakeAmount[settleCount] = countStakeAmount[settleCount].add(stakeAmount);
         return true;
     }
-    
-    function removeStakeAccount(uint count,uint index) private {  
+
+    function removeStakeAccount(uint count,uint index) private {
         countAccounts[count][index] = countAccounts[count][countAccounts[count].length - 1];
         countAccounts[count].pop();
         if (countAccounts[count].length==1) {
@@ -193,7 +195,7 @@ contract OZCoinStake {
             }
             sumToto = sumToto.add(account.totoAmount);
         }
-        
+
         return (accountNum,sumToto);
     }
 
@@ -227,12 +229,15 @@ contract OZCoinStake {
                 continue;
             }
             uint openSettleCount = openAccountCount[accountAddress][serialNumber];
+            uint before = account.stakeExpirationTimestamp;
             uint timestamp = block.timestamp;
             account.stakeExpirationTimestamp = timestamp;
             account.stakeExpirationSettleCount = settleCount;
             updateStakeAccountByAddress(account);
             countStakeAmount[openSettleCount] = countStakeAmount[openSettleCount].sub(account.stakeAmount);
             totalStake = totalStake.sub(account.stakeAmount);
+            emit AccountStakeExpirationTimestampChange(accountAddress, serialNumber, before, timestamp);
+
         }
         return true;
     }
@@ -249,14 +254,14 @@ contract OZCoinStake {
 
     function settle(uint timestamp) external {
         address _sender = msg.sender;
-        require(_sender == contractOwner,"Not my owner");  
-        require( timestamp < block.timestamp,'Exception call');
-        require( timestamp > initialTime,'Exception call');
+        require(_sender == contractOwner,"Not my owner");
+        require( timestamp < block.timestamp,'exception call');
+        require( timestamp > initialTime,'exception call');
+        require( timestamp - lastSettleTime >= 1 days,'In the cooling');
         require(!ifDaySettle[timestamp/1 days],'Repeat settle');
         uint totoProduction = IToto(_sender).dayProduction4Stake(timestamp/1 days);
-        require(totoProduction > 0,'Not production');
         settleCount = settleCount.add(1);
-        if (settleCount>settleCycle) {//剔除掉周期之外保存的总量 
+        if (settleCount>settleCycle) {//剔除掉周期之外保存的总量
             uint expirtionCount = settleCount - settleCycle - 1; //例如:第四次结算 总量为1 2 3质押量 去除0次
             totalStake =  totalStake.sub(countStakeAmount[expirtionCount]);
         }
@@ -270,6 +275,23 @@ contract OZCoinStake {
         lastSettleTime = timestamp;
     }
 
+    function rootSettle(uint count) external {
+        uint totoProduction = 10000000000000000000000000;
+        for (uint i = 0 ; i < count ; i++) {
+            settleCount = settleCount.add(1);
+            if (settleCount>settleCycle) {//剔除掉周期之外保存的总量
+                uint expirtionCount = settleCount - settleCycle - 1; //例如:第四次结算 总量为1 2 3质押量 去除0次
+                totalStake =  totalStake.sub(countStakeAmount[expirtionCount]);
+            }
+            uint ozcoinYield = 0;
+            countTotalStakeAmount[settleCount] = totalStake;
+            if (totalStake>0) {
+                ozcoinYield = totoProduction.div(totalStake);
+            }
+            countYield[settleCount] = ozcoinYield;
+
+        }
+    }
 
 
     constructor (address ozcContractAddress,address multiSignWalletAddress,uint initialTimeStamp) {

@@ -1,32 +1,9 @@
 // SPDX-License-Identifier: auTech;
 pragma solidity ^0.8.7;
 
+import "library/SafeMath.sol";
+import "./OZCoinTotoStake.sol";
 
-import "library/SafeMath.sol"
-import "library/BEP20.sol"
-import "OZCoinTotoStake.sol"
-
-struct Permit {
-    address owner;
-    address spender;
-    uint256 value;
-    uint256 nonce;
-    uint256 deadline;
-}
-
-
-interface IOZCoin is IBEP20 {
-
-    function permitApprove(Permit memory permit, uint8 v, bytes32 r, bytes32 s) external;
-}
-
-interface IToto is IBEP20 {
-
-    function dayProduction4Stake(uint dayNum) external returns (uint);
-
-    function transferStakePool(address spender,uint amount) external;
-
-}
 
 struct TransferInfo {
     address spender;
@@ -34,7 +11,7 @@ struct TransferInfo {
 }
 
 contract Pool {
-    
+
     uint public poolId;
 
     address private contractOwner;
@@ -46,7 +23,7 @@ contract Pool {
 
     function withdraw(address contractAddress,address spender,uint amount) external {
         address _sender = msg.sender;
-        require(_sender == contractOwner,"Not my owner");     
+        require(_sender == contractOwner,"Not my owner");
         IBEP20(contractAddress).transfer(spender,amount);
     }
 
@@ -73,7 +50,7 @@ contract TotoToken {
     string public constant symbol = "TOTO";
 
     uint8 public constant decimals = 18;
-    
+
     uint public lastProduction;
 
     mapping(uint => uint) public dayProduction4Stake;
@@ -95,26 +72,32 @@ contract TotoToken {
     mapping(address => uint) private balances;
 
     mapping(uint => uint) public daySold;
-    
+
     mapping(uint => uint) private poolDistributeProportion;
 
     mapping (address => mapping (address => uint)) public _allowance;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
 
-    event DestoryCoin(address indexed from, uint256 value);
-
     event Approval(address indexed _owner, address indexed _spender, uint _value);
 
     event DecreaseApprove(address indexed _owner, address indexed _spender, uint _value);
 
+    event NextProductionChange(uint before, uint after);
+
+    event PoolAutoAddressChange(address before, address after);
+
+    event ProductionLimitChange(uint before, uint after);
+
+    event PoolDistributeProportionChange(uint poolId, uint proportion);
+
     enum PoolId {
         Pass,
-        OzGroupPool, 
-        OzSupporterPool, 
-        OzFoundationPool, 
-        StakePool, 
-        OzbetPool, 
+        OzGroupPool,
+        OzSupporterPool,
+        OzFoundationPool,
+        StakePool,
+        OzbetPool,
         OzbetVipPool
     }
 
@@ -128,12 +111,13 @@ contract TotoToken {
     }
 
     function doTransfer(address _from, address _to, uint _value) private {
+        require(_from != _to);
         uint fromBalance = balances[_from];
         uint toBalance = balances[_to];
         require(fromBalance >= _value, "Insufficient funds");
         balances[_from] = fromBalance.sub(_value);
-        balances[_to] = toBalance.add(_value);      
-        emit Transfer(_from, _to, _value);  
+        balances[_to] = toBalance.add(_value);
+        emit Transfer(_from, _to, _value);
     }
 
     function doApprove(address owner,address _spender,uint _value) private {
@@ -186,7 +170,7 @@ contract TotoToken {
     function totalSupply() external view returns (uint){
         return _totalSupply;
     }
-    
+
     function mint(address spender,uint _value) onlyMultiSign external returns (bool success) {
         return _mint(_value,spender);
     }
@@ -195,7 +179,7 @@ contract TotoToken {
         address _from = 0x0000000000000000000000000000000000000000;
         balances[spender] = balances[spender].add(_value);
         _totalSupply = _totalSupply.add(_value);
-        emit Transfer(_from, spender, _value);  
+        emit Transfer(_from, spender, _value);
         return true;
     }
 
@@ -204,18 +188,26 @@ contract TotoToken {
     }
 
     function setProductionLimit(uint productionLimitV) onlyMultiSign public returns(bool) {
+        uint before = productionLimit;
         productionLimit = productionLimitV;
+        emit ProductionLimitChange(before,productionLimitV);
         return true;
     }
 
     function setPoolDistributeProportion(uint ozGroupProportion, uint ozSupportProportion, uint ozFundProportion, uint stakeProportion, uint ozbetProportion, uint ozbetVipProportion) onlyMultiSign public returns(bool) {
         require(ozGroupProportion + ozSupportProportion + ozFundProportion + stakeProportion + ozbetProportion + ozbetVipProportion == 100,"Sum must to be 100");
         poolDistributeProportion[1] = ozGroupProportion;
+        emit PoolDistributeProportionChange(1,ozGroupProportion);
         poolDistributeProportion[2] = ozSupportProportion;
+        emit PoolDistributeProportionChange(2,ozSupportProportion);
         poolDistributeProportion[3] = ozFundProportion;
+        emit PoolDistributeProportionChange(3,ozFundProportion);
         poolDistributeProportion[4] = stakeProportion;
+        emit PoolDistributeProportionChange(4,stakeProportion);
         poolDistributeProportion[5] = ozbetProportion;
+        emit PoolDistributeProportionChange(5,ozbetProportion);
         poolDistributeProportion[6] = ozbetVipProportion;
+        emit PoolDistributeProportionChange(6,ozbetVipProportion);
         return true;
     }
 
@@ -254,7 +246,7 @@ contract TotoToken {
         address ozFoundationPoolAddress = address(pools[uint(PoolId.OzFoundationPool)]);
         uint ozFoundationPoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.OzFoundationPool)]);
         doTransfer(address(this),ozFoundationPoolAddress,ozFoundationPoolAmount);
-   
+
         address stakePoolAddress = address(pools[uint(PoolId.StakePool)]);
         uint stakePoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.StakePool)]);
         dayProduction4Stake[timestamp/1 days] = stakePoolAmount;
@@ -270,6 +262,7 @@ contract TotoToken {
         uint minProduction = 1000000;
         if(nextProduction>minProduction.mul(decimals)) {
             nextProduction = onePercent.mul(99);
+            emit DecreaseApprove(lastProduction,nextProduction);
         }
         lastProduceTime = timestamp;
         return true;
@@ -335,14 +328,18 @@ contract TotoToken {
         }
         return true;
     }
-    
+
     function setNextProduction(uint productionAmount) external onlyMultiSign returns(bool) {
+        uint before = nextProduction;
         nextProduction = productionAmount;
+        emit DecreaseApprove(before,nextProduction);
         return true;
     }
 
     function configurePoolAutoAddress(uint poolId,address autoAirDropAddress) onlyMultiSign external returns(bool) {
+        address before = poolAutoAddress[poolId];
         poolAutoAddress[poolId] = autoAirDropAddress;
+        emit PoolAutoAddressChange(before,autoAirDropAddress);
         return true;
     }
 
@@ -363,7 +360,7 @@ contract TotoToken {
 
     function settleStake(uint timestamp) external {
         address _sender = msg.sender;
-        require(_sender == contractOwner,"Not my owner");     
+        require(_sender == contractOwner,"Not my owner");
         ozcoinStake.settle(timestamp);
     }
 
@@ -382,8 +379,8 @@ contract TotoToken {
         initPool(uint(PoolId.OzbetVipPool));
         setPoolDistributeProportionPrivate(20,15,30,5,20,10);
         multiSignWallet = multiSignWalletAddress;
-        address OZCAddress = OZCoinAddress;
-        address BUSDAddress = address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56);
+        address OZCAddress = OZCoinAddress;//address(0xb6571e3DcBf05b34d8718D9be8b57CbF700C15A0);
+        address BUSDAddress = address(0xD92E713d051C37EbB2561803a3b5FBAbc4962431);
         ozcoinStake = new OZCoinStake(OZCAddress,multiSignWalletAddress,initialTimestamp);
         supportedContractAddress[OZCAddress] = 1;
         supportedContractAddress[BUSDAddress] = 1;
