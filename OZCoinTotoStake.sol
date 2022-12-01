@@ -89,7 +89,7 @@ contract OZCoinStake {
 
     address multiSignWallet;
 
-    event AccountStakeExpirationTimestampChange(address accountAddress, uint serialNumber, uint before, uint after);
+    event AccountStakeExpirationTimestampChange(address accountAddress, uint serialNumber, uint beforeValue, uint afterValue);
 
     modifier onlyMultiSign() {
         require(msg.sender == multiSignWallet,"Forbidden");
@@ -273,24 +273,6 @@ contract OZCoinStake {
         }
         countYield[settleCount] = ozcoinYield;
         lastSettleTime = timestamp;
-    }
-
-    function rootSettle(uint count) external {
-        uint totoProduction = 10000000000000000000000000;
-        for (uint i = 0 ; i < count ; i++) {
-            settleCount = settleCount.add(1);
-            if (settleCount>settleCycle) {//剔除掉周期之外保存的总量
-                uint expirtionCount = settleCount - settleCycle - 1; //例如:第四次结算 总量为1 2 3质押量 去除0次
-                totalStake =  totalStake.sub(countStakeAmount[expirtionCount]);
-            }
-            uint ozcoinYield = 0;
-            countTotalStakeAmount[settleCount] = totalStake;
-            if (totalStake>0) {
-                ozcoinYield = totoProduction.div(totalStake);
-            }
-            countYield[settleCount] = ozcoinYield;
-
-        }
     }
 
 

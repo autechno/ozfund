@@ -77,17 +77,19 @@ contract TotoToken {
 
     mapping (address => mapping (address => uint)) public _allowance;
 
+    event ContractOwnerChange(address beforeAddress, address afterAddress);
+
     event Transfer(address indexed from, address indexed to, uint256 value);
 
     event Approval(address indexed _owner, address indexed _spender, uint _value);
 
     event DecreaseApprove(address indexed _owner, address indexed _spender, uint _value);
 
-    event NextProductionChange(uint before, uint after);
+    event NextProductionChange(uint beforeValue, uint afterValue);
 
-    event PoolAutoAddressChange(address before, address after);
+    event PoolAutoAddressChange(address beforeValue, address afterValue);
 
-    event ProductionLimitChange(uint before, uint after);
+    event ProductionLimitChange(uint beforeValue, uint afterValue);
 
     event PoolDistributeProportionChange(uint poolId, uint proportion);
 
@@ -222,7 +224,9 @@ contract TotoToken {
     }
 
     function setContractOwner(address newOwner) onlyMultiSign external returns (bool) {
+        address beforeAddress = contractOwner;
         contractOwner = newOwner;
+        emit ContractOwnerChange(beforeAddress,newOwner);
         return true;
     }
 
@@ -332,7 +336,7 @@ contract TotoToken {
     function setNextProduction(uint productionAmount) external onlyMultiSign returns(bool) {
         uint before = nextProduction;
         nextProduction = productionAmount;
-        emit DecreaseApprove(before,nextProduction);
+        emit NextProductionChange(before,nextProduction);
         return true;
     }
 
