@@ -45,7 +45,7 @@ contract TotoToken {
 
     uint256 private _totalSupply;
 
-    string public constant name = "Toto";
+    string public constant name = "TOTO";
 
     string public constant symbol = "TOTO";
 

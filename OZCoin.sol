@@ -9,7 +9,7 @@ contract OZCoinToken {
 
     using SafeMath for uint;
 
-    string public constant name = "OZCoin";
+    string public constant name = "Ozcoin";
 
     string public constant symbol = "OZC";
 
