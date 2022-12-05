@@ -113,19 +113,16 @@ contract TotoToken {
     }
 
     function doTransfer(address _from, address _to, uint _value) private {
-        require(_from != _to);
+        require(!isFreeze[_from],"Been frozen");
         uint fromBalance = balances[_from];
-        uint toBalance = balances[_to];
         require(fromBalance >= _value, "Insufficient funds");
         balances[_from] = fromBalance.sub(_value);
-        balances[_to] = toBalance.add(_value);
+        balances[_to] = balances[_to].add(_value);
         emit Transfer(_from, _to, _value);
     }
 
     function doApprove(address owner,address _spender,uint _value) private {
-        uint remaining = _allowance[owner][_spender];
-        remaining = remaining.add(_value);
-        _allowance[owner][_spender] = remaining;
+        _allowance[owner][_spender] = _value;
         emit Approval(owner,_spender,_value);
     }
 
