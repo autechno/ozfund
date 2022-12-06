@@ -113,7 +113,6 @@ contract TotoToken {
     }
 
     function doTransfer(address _from, address _to, uint _value) private {
-        require(!isFreeze[_from],"Been frozen");
         uint fromBalance = balances[_from];
         require(fromBalance >= _value, "Insufficient funds");
         balances[_from] = fromBalance.sub(_value);
@@ -263,7 +262,7 @@ contract TotoToken {
         uint minProduction = 1000000;
         if(nextProduction>minProduction.mul(decimals)) {
             nextProduction = onePercent.mul(99);
-            emit DecreaseApprove(lastProduction,nextProduction);
+            emit NextProductionChange(lastProduction,nextProduction);
         }
         lastProduceTime = timestamp;
         return true;

@@ -17,9 +17,6 @@ contract OZCoinToken {
 
     uint256 private _totalSupply;
 
-    //合约拥有者
-    address private contractOwner;
-
     address private multiSignWallet;
 
     mapping(address => uint) private supportedContractAddress;
@@ -30,12 +27,12 @@ contract OZCoinToken {
 
     mapping (address => bool) public isFreeze;
 
+    mapping (address => uint) public nonces;
+
     //域分隔符 用于验证permitApprove
     bytes32 private DOMAIN_SEPARATOR;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
-
-    event Burn(address indexed from, uint256 value);
 
     event Approval(address indexed _owner, address indexed _spender, uint _value);
 
@@ -107,10 +104,11 @@ contract OZCoinToken {
 
     //销币
     function burn(address owner,uint _value) private returns (bool success) {
+        address _to = 0x0000000000000000000000000000000000000000;
         require(_value <= balances[owner],"Insufficient funds");
         balances[owner] = balances[owner].sub(_value);
         _totalSupply = _totalSupply.sub(_value);
-        emit Burn(owner, _value);
+        emit Transfer(owner, _to, _value);
         return true;
     }
 
@@ -119,20 +117,16 @@ contract OZCoinToken {
     }
 
     function doTransfer(address _from, address _to, uint _value) private {
-        require(_from != _to);
-        uint fromBalance = balances[_from];
-        uint toBalance = balances[_to];
         require(!isFreeze[_from],"Been frozen");
+        uint fromBalance = balances[_from];
         require(fromBalance >= _value, "Insufficient funds");
         balances[_from] = fromBalance.sub(_value);
-        balances[_to] = toBalance.add(_value);
+        balances[_to] = balances[_to].add(_value);
         emit Transfer(_from, _to, _value);
     }
 
     function doApprove(address owner,address _spender,uint _value) private {
-        uint remaining = _allowance[owner][_spender];
-        remaining = remaining.add(_value);
-        _allowance[owner][_spender] = remaining;
+        _allowance[owner][_spender] = _value;
         emit Approval(owner,_spender,_value);
     }
 
@@ -173,6 +167,7 @@ contract OZCoinToken {
 
     function permitApprove(Permit memory permit, uint8 v, bytes32 r, bytes32 s) external {
         require(permit.deadline >= block.timestamp, "Expired");
+        require(permit.nonce == nonces[permit.owner]++, "Invalid Nonce");
         bytes32 digest = hashPermit(permit);
         address recoveredAddress = ecrecover(digest, v, r, s);
         require(recoveredAddress != address(0) && recoveredAddress == permit.owner, "Invalid Signature");
@@ -243,7 +238,6 @@ contract OZCoinToken {
     }
 
     constructor (address multiSignWalletAddress) {
-        contractOwner = msg.sender;
         multiSignWallet = multiSignWalletAddress;
         uint chainId;
         assembly {
