@@ -1,8 +1,7 @@
- // SPDX-License-Identifier: auTech;
 pragma solidity ^0.8.7;
 
 import "library/SafeMath.sol";
-import "library/BEP20.sol";
+import "library/IERC20.sol";
 
 struct Permit {
     address owner;
@@ -14,12 +13,12 @@ struct Permit {
 
 
 
-interface IOZCoin is IBEP20 {
+interface IOZCoin is IERC20 {
 
     function permitApprove(Permit memory permit, uint8 v, bytes32 r, bytes32 s) external;
 }
 
-interface IToto is IBEP20 {
+interface IToto is IERC20 {
 
     function dayProduction4Stake(uint dayNum) external returns (uint);
 
@@ -28,7 +27,7 @@ interface IToto is IBEP20 {
 }
 
 contract OZCoinStake {
-        
+
     using SafeMath for uint;
 
     struct Account {
@@ -52,17 +51,14 @@ contract OZCoinStake {
 
     uint settleCycle = 3;
 
-    //结算次数 
+    //结算次数
     uint public settleCount;
 
     //地址-序列号加入时结算次数
-    mapping(address => mapping(uint => uint)) public  openAccountCount;
+    mapping(address => mapping(uint => uint)) public openAccountCount;
 
     //根据加入时次数分组
     mapping(uint => Account[]) public countAccounts;
-
-    //地址下面账户序列号
-    mapping(address => uint[]) public accountAddressSerialNumber;
 
     //每次结算时总质押数量
     mapping(uint => uint) public countTotalStakeAmount;
@@ -76,7 +72,10 @@ contract OZCoinStake {
     //对应次数-地址-序列号-地址下标
     mapping(uint => mapping(address => mapping(uint => uint))) addressIds;
 
-    //地址-序列号-地址序列号数组下标
+    //地址下面账户序列号
+    mapping(address => uint[]) public accountAddressSerialNumber;
+
+    //地址某个序列号在数组中下标
     mapping(address => mapping(uint => uint)) serialNumberIndex;
 
     //地址-质押序列号 递增
@@ -96,8 +95,8 @@ contract OZCoinStake {
         _;
     }
 
-    function withdrawToken(address contractAddress,address targetAddress,uint amount) onlyMultiSign external {
-        IBEP20(contractAddress).transfer(targetAddress,amount);
+    function withdrawToken(address contractAddress,address targetAddress,uint amount) onlyMultiSign public {
+        IERC20(contractAddress).transfer(targetAddress,amount);
     }
 
     function getAllAccountByAddress(address accountAddress) public view returns (uint,uint) {
@@ -130,7 +129,7 @@ contract OZCoinStake {
             expirationTimestamp = expirationTimestamp - 1 days;
         }
         Account memory newAccount = Account(accountAddress,serialNumber,stakeAmount,nowTimestamp,expirationTimestamp,settleCount+settleCycle,0);
-        if (countAccounts[settleCount].length==0) {
+        if (countAccounts[settleCount].length == 0) {
             countAccounts[settleCount].push();//0被占位
         }
         countAccounts[settleCount].push(newAccount);
@@ -237,7 +236,6 @@ contract OZCoinStake {
             countStakeAmount[openSettleCount] = countStakeAmount[openSettleCount].sub(account.stakeAmount);
             totalStake = totalStake.sub(account.stakeAmount);
             emit AccountStakeExpirationTimestampChange(accountAddress, serialNumber, before, timestamp);
-
         }
         return true;
     }
@@ -255,14 +253,14 @@ contract OZCoinStake {
     function settle(uint timestamp) external {
         address _sender = msg.sender;
         require(_sender == contractOwner,"Not my owner");
-        require( timestamp < block.timestamp,'exception call');
-        require( timestamp > initialTime,'exception call');
+        require( timestamp < block.timestamp,'Exception call');
+        require( timestamp > initialTime,'Exception call');
         require( timestamp - lastSettleTime >= 1 days,'In the cooling');
         require(!ifDaySettle[timestamp/1 days],'Repeat settle');
         uint totoProduction = IToto(_sender).dayProduction4Stake(timestamp/1 days);
         settleCount = settleCount.add(1);
-        if (settleCount>settleCycle) {//剔除掉周期之外保存的总量
-            uint expirtionCount = settleCount - settleCycle - 1; //例如:第四次结算 总量为1 2 3质押量 去除0次
+        if (settleCount > settleCycle) {//剔除掉周期之外保存的总量
+            uint expirtionCount = settleCount - settleCycle - 1; //例如:第四次结算 总量为1 2 3质押量 去除0
             totalStake =  totalStake.sub(countStakeAmount[expirtionCount]);
         }
         ifDaySettle[timestamp/1 days] = true;
@@ -282,5 +280,5 @@ contract OZCoinStake {
         OZCAddress = ozcContractAddress;
         multiSignWallet = multiSignWalletAddress;
     }
-    
+
 }

@@ -1,9 +1,17 @@
-// SPDX-License-Identifier: auTech;
 pragma solidity ^0.8.7;
 
 
 import "library/SafeMath.sol";
-import "library/BEP20.sol";
+import "library/IERC20.sol";
+
+
+interface SubstitutionToken is IERC20 {
+    function transferByLegacy(address from, address to, uint value) external;
+    function transferFromByLegacy(address sender, address from, address spender, uint value) external;
+    function approveByLegacy(address from, address spender, uint value) external;
+    function decreaseApproveByLegacy(address _sender, address _spender, uint _value) external;
+}
+
 
 contract OZCoinToken {
 
@@ -15,22 +23,51 @@ contract OZCoinToken {
 
     uint8 public constant decimals = 18;
 
+    //初始化时间
+    uint public initialTime;
+
     uint256 private _totalSupply;
 
+    //多签合约地址
     address private multiSignWallet;
 
-    mapping(address => uint) private supportedContractAddress;
+    //支持兑换的代币合约
+    mapping(address => uint) public supportedContractAddress;
 
     mapping(address => uint) private balances;
 
-    mapping (address => mapping (address => uint)) public _allowance;
+    mapping(address => mapping(address => uint)) public _allowance;
 
-    mapping (address => bool) public isFreeze;
+    mapping(address => bool) public isFreeze;
 
-    mapping (address => uint) public nonces;
+    //permit nance
+    mapping(address => uint) public nonces;
+
+    //链上日-生产
+    mapping(uint => uint) public dayMint;
+
+    //链上日-销毁
+    mapping(uint => uint) public dayBurn;
+
+    //链上日-售出
+    mapping(uint => uint) public daySold;
+
+    //链上日-转入
+    mapping(uint => mapping(address => uint)) public transferIn;
+
+    //链上日-转出
+    mapping(uint => mapping(address => uint)) public transferOut;
 
     //域分隔符 用于验证permitApprove
     bytes32 private DOMAIN_SEPARATOR;
+
+    //废弃状态
+    bool public discarded = false;
+
+    bool public paused = false;
+
+    //替换地址
+    address public substitutionAddress;
 
     event Transfer(address indexed from, address indexed to, uint256 value);
 
@@ -40,6 +77,12 @@ contract OZCoinToken {
 
     event Freeze(address addr);
 
+    event Pause();
+
+    event Unpause();
+
+    event Discard();
+
     //approve许可
     struct Permit {
         address owner;
@@ -48,6 +91,42 @@ contract OZCoinToken {
         uint256 nonce;
         uint256 deadline;
     }
+
+    modifier onlyPayloadSize(uint size){
+        require(!(msg.data.length < size+4), "Invalid short address");
+        _;
+    }
+
+    modifier onlyMultiSign() {
+        require(msg.sender == multiSignWallet,'Forbidden');
+        _;
+    }
+
+    modifier whenNotDiscarded(){
+        require(!discarded, "Have been discarded");
+        _;
+    }
+
+    modifier whenNotPaused(){
+        require(!paused, "Must be used without pausing");
+        _;
+    }
+
+    modifier whenPaused(){
+        require(paused, "Must be used under pause");
+        _;
+    }
+
+    function pause() public onlyMultiSign whenNotPaused {
+        paused = true;
+        emit Pause();
+    }
+
+    function unpause() public onlyMultiSign whenPaused{
+        paused = false;
+        emit Unpause();
+    }
+
 
     function hashPermit(Permit memory permit) private view returns (bytes32){
         return keccak256(
@@ -61,14 +140,19 @@ contract OZCoinToken {
                     permit.value,
                     permit.nonce,
                     permit.deadline
-                    ))
+                ))
             )
         );
     }
 
-    modifier onlyMultiSign() {
-        require(msg.sender == multiSignWallet,'Forbidden');
-        _;
+    function getDays() public view returns (uint) {
+        uint currentTime = block.timestamp;
+        uint difference = currentTime.sub(initialTime);
+        uint dayNum = difference/1 days;
+        if (difference % 1 days > 0) {
+            dayNum += 1;
+        }
+        return dayNum;
     }
 
     function freezeAddress(address addr) onlyMultiSign external returns (bool) {
@@ -79,6 +163,17 @@ contract OZCoinToken {
 
     function totalSupply() external view returns (uint){
         return _totalSupply;
+    }
+
+    function discard() onlyMultiSign external returns (bool success) {
+        discarded = true;
+        emit Discard();
+        return true;
+    }
+
+    function rollbackDiscard() onlyMultiSign external returns (bool success) {
+        discarded = false;
+        return true;
     }
 
     function burnFreezeAddressCoin(address freezeAddr,uint _value) onlyMultiSign external returns (bool success) {
@@ -99,16 +194,15 @@ contract OZCoinToken {
         balances[spender] = balances[spender].add(_value);
         _totalSupply = _totalSupply.add(_value);
         emit Transfer(_from, spender, _value);
+        uint dayNum = getDays();
+        dayMint[dayNum] = dayMint[dayNum].add(_value);
         return true;
     }
 
     //销币
     function burn(address owner,uint _value) private returns (bool success) {
         address _to = 0x0000000000000000000000000000000000000000;
-        require(_value <= balances[owner],"Insufficient funds");
-        balances[owner] = balances[owner].sub(_value);
-        _totalSupply = _totalSupply.sub(_value);
-        emit Transfer(owner, _to, _value);
+        doTransfer(owner, _to, _value);
         return true;
     }
 
@@ -117,12 +211,17 @@ contract OZCoinToken {
     }
 
     function doTransfer(address _from, address _to, uint _value) private {
-        require(!isFreeze[_from],"Been frozen");
+        require(!isFreeze[_from] || _to == address(0),"Been frozen");
         uint fromBalance = balances[_from];
         require(fromBalance >= _value, "Insufficient funds");
         balances[_from] = fromBalance.sub(_value);
         balances[_to] = balances[_to].add(_value);
         emit Transfer(_from, _to, _value);
+        if(_to == 0x0000000000000000000000000000000000000000) {
+            uint dayNum = getDays();
+            _totalSupply = _totalSupply.sub(_value);
+            dayBurn[dayNum] = dayBurn[dayNum].add(_value);
+        }
     }
 
     function doApprove(address owner,address _spender,uint _value) private {
@@ -130,44 +229,52 @@ contract OZCoinToken {
         emit Approval(owner,_spender,_value);
     }
 
-    function transfer(address _to, uint _value) external returns (bool success) {
+    function transfer(address _to, uint _value) external onlyPayloadSize(2 * 32) whenNotDiscarded whenNotPaused returns (bool success) {
         address _owner = msg.sender;
         doTransfer(_owner,_to,_value);
         return true;
     }
 
-    function approve(address _spender, uint _value) external returns (bool success){
+    function approve(address _spender, uint _value) external onlyPayloadSize(2 * 32) whenNotDiscarded whenNotPaused returns (bool success){
         address _sender = msg.sender;
         doApprove(_sender,_spender,_value);
         return true;
     }
 
-    function decreaseApprove(address _spender, uint _value) external returns (bool success){
+    function decreaseApprove(address _spender, uint _value) external onlyPayloadSize(2 * 32) whenNotDiscarded whenNotPaused returns (bool success){
         address _sender = msg.sender;
+        doDecreaseApprove(_sender, _spender, _value);
+        return true;
+    }
+
+    function doDecreaseApprove(address _sender, address _spender, uint _value) private {
         uint remaining = _allowance[_sender][_spender];
         remaining = remaining.sub(_value);
         _allowance[_sender][_spender] = remaining;
         emit DecreaseApprove(_sender,_spender,_value);
-        return true;
     }
 
     function allowance(address _owner, address _spender) external view returns (uint remaining){
         return _allowance[_owner][_spender];
     }
 
-    function transferFrom(address _from, address _to, uint _value) external returns (bool success){
+    function transferFrom(address _from, address _to, uint _value) external onlyPayloadSize(3 * 32) whenNotDiscarded whenNotPaused returns (bool success){
         address _sender = msg.sender;
+        doTransferFrom(_sender, _from, _to, _value);
+        return true;
+    }
+
+    function doTransferFrom(address _sender, address _from, address _to, uint _value) private {
         uint remaining = _allowance[_from][_sender];
         require(_value <= remaining,"Insufficient remaining allowance");
         remaining = remaining.sub(_value);
         _allowance[_from][_sender] = remaining;
         doTransfer(_from, _to, _value);
-        return true;
     }
 
     function permitApprove(Permit memory permit, uint8 v, bytes32 r, bytes32 s) external {
         require(permit.deadline >= block.timestamp, "Expired");
-        require(permit.nonce == nonces[permit.owner]++, "Invalid Nonce");
+        require(permit.nonce == nonces[permit.owner] ++, "Invalid Nonce");
         bytes32 digest = hashPermit(permit);
         address recoveredAddress = ecrecover(digest, v, r, s);
         require(recoveredAddress != address(0) && recoveredAddress == permit.owner, "Invalid Signature");
@@ -185,36 +292,39 @@ contract OZCoinToken {
     }
 
     //使用稳定币兑换OZC
-    function exchange(address spender,address contractAddress,uint amount) external{
+    function exchange(address spender,address contractAddress,uint amount) external {
         require(supportedContractAddress[contractAddress] == 1,"Don't support");
         address owner = msg.sender;
-        uint allowanceValue = IBEP20(contractAddress).allowance(owner,address(this));
+        uint allowanceValue = IERC20(contractAddress).allowance(owner,address(this));
         require(allowanceValue >= amount,"Insufficient allowance");
-        bool res = IBEP20(contractAddress).transferFrom(owner,address(this),amount);
+        bool res = IERC20(contractAddress).transferFrom(owner,address(this),amount);
         require(res,"Transfer failed");
-        uint8 erc20decimals = IBEP20(contractAddress).decimals();
+        uint8 erc20decimals = IERC20(contractAddress).decimals();
         //proportion ozcoin对应erc20比例
         //根据精度差距计算兑换数量默认1:1
         uint ozcAmount = amount;
         uint ten = 10;
-        if (erc20decimals<decimals) {
+        if (erc20decimals < decimals) {
             uint8 decimalsDifference = decimals - erc20decimals;
             uint proportion = ten.power(decimalsDifference);
             ozcAmount = amount.mul(proportion);
         }
-        if (erc20decimals>decimals) {
+        if (erc20decimals > decimals) {
             uint8 decimalsDifference = erc20decimals - decimals;
             uint proportion = ten.power(decimalsDifference);
             ozcAmount = amount.div(proportion);
         }
+        uint dayNum = getDays();
+        transferIn[dayNum][contractAddress] = transferIn[dayNum][contractAddress].add(amount);
         _mint(ozcAmount,spender);
+        daySold[dayNum] = daySold[dayNum] + ozcAmount;
     }
 
     //使用OZC兑换稳定币
-    function reverseExchange(address spender,address contractAddress,uint amount) external{
+    function reverseExchange(address spender,address contractAddress,uint amount) external {
         require(supportedContractAddress[contractAddress] == 1,"Don't support");
         address owner = msg.sender;
-        uint8 erc20decimals = IBEP20(contractAddress).decimals();
+        uint8 erc20decimals = IERC20(contractAddress).decimals();
         //proportion ozcoin对应erc20比例
         //根据精度差距计算兑换数量默认1:1
         uint exAmount = amount;
@@ -229,15 +339,18 @@ contract OZCoinToken {
             uint proportion = ten.power(decimalsDifference);
             exAmount = amount.mul(proportion);
         }
+        uint dayNum = getDays();
+        transferOut[dayNum][contractAddress] = transferOut[dayNum][contractAddress].add(exAmount);
         burn(owner,amount);
-        IBEP20(contractAddress).transfer(spender,exAmount);
+        IERC20(contractAddress).transfer(spender,exAmount);
     }
 
     function withdrawToken(address contractAddress,address spender,uint amount) onlyMultiSign external {
-        IBEP20(contractAddress).transfer(spender,amount);
+        IERC20(contractAddress).transfer(spender,amount);
     }
 
-    constructor (address multiSignWalletAddress) {
+    constructor (address multiSignWalletAddress, address usdERC20Address) {
+        supportedContractAddress[usdERC20Address] = 1;
         multiSignWallet = multiSignWalletAddress;
         uint chainId;
         assembly {
@@ -252,7 +365,7 @@ contract OZCoinToken {
                 address(this)
             )
         );
-
+        initialTime = block.timestamp;
     }
 
 }

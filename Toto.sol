@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: auTech;
 pragma solidity ^0.8.7;
 
 import "library/SafeMath.sol";
@@ -24,7 +23,7 @@ contract Pool {
     function withdraw(address contractAddress,address spender,uint amount) external {
         address _sender = msg.sender;
         require(_sender == contractOwner,"Not my owner");
-        IBEP20(contractAddress).transfer(spender,amount);
+        IERC20(contractAddress).transfer(spender,amount);
     }
 
 }
@@ -67,15 +66,39 @@ contract TotoToken {
 
     mapping(uint => address) public poolAutoAddress;
 
-    mapping(address => uint) private supportedContractAddress;
+    mapping(address => uint) public supportedContractAddress;
 
     mapping(address => uint) private balances;
 
     mapping(uint => uint) public daySold;
 
-    mapping(uint => uint) private poolDistributeProportion;
+    mapping(uint => uint) public dayBurn;
+
+    mapping(uint => uint) public dayMint;
+
+    mapping(uint => uint) public dayProduction;
+
+    mapping(uint => uint) public poolDistributeProportion;
+
+    mapping(uint => mapping(address => uint)) public transferIn;
+
+    mapping(uint => mapping(address => uint)) public transferOut;
+
+    mapping(uint => mapping(uint => uint)) public dayPoolProduction;
 
     mapping (address => mapping (address => uint)) public _allowance;
+
+    bool public paused = false;
+
+    enum PoolId {
+        Pass,
+        OzGroupPool,
+        OzSupporterPool,
+        OzFoundationPool,
+        StakePool,
+        OzbetPool,
+        OzbetVipPool
+    }
 
     event ContractOwnerChange(address beforeAddress, address afterAddress);
 
@@ -93,19 +116,39 @@ contract TotoToken {
 
     event PoolDistributeProportionChange(uint poolId, uint proportion);
 
-    enum PoolId {
-        Pass,
-        OzGroupPool,
-        OzSupporterPool,
-        OzFoundationPool,
-        StakePool,
-        OzbetPool,
-        OzbetVipPool
+    event Pause();
+
+    event Unpause();
+
+
+    modifier onlyPayloadSize(uint size){
+        require(!(msg.data.length < size+4), "Invalid short address");
+        _;
     }
 
     modifier onlyMultiSign() {
         require(msg.sender == multiSignWallet,"Forbidden");
         _;
+    }
+
+    modifier whenNotPaused(){
+        require(!paused, "Must be used without pausing");
+        _;
+    }
+
+    modifier whenPaused(){
+        require(paused, "Must be used under pause");
+        _;
+    }
+
+    function pause() public onlyMultiSign whenNotPaused {
+        paused = true;
+        emit Pause();
+    }
+
+    function unpause() public onlyMultiSign whenPaused{
+        paused = false;
+        emit Unpause();
     }
 
     function balanceOf(address _owner) external view returns (uint balance) {
@@ -118,6 +161,11 @@ contract TotoToken {
         balances[_from] = fromBalance.sub(_value);
         balances[_to] = balances[_to].add(_value);
         emit Transfer(_from, _to, _value);
+        if(_to == address(0)) {
+            uint dayNum = getDays();
+            _totalSupply = _totalSupply.sub(_value);
+            dayBurn[dayNum] = dayBurn[dayNum].add(_value);
+        }
     }
 
     function doApprove(address owner,address _spender,uint _value) private {
@@ -125,19 +173,19 @@ contract TotoToken {
         emit Approval(owner,_spender,_value);
     }
 
-    function transfer(address _to, uint _value) external returns (bool success) {
+    function transfer(address _to, uint _value) external onlyPayloadSize(2 * 32) whenNotPaused returns (bool success) {
         address _owner = msg.sender;
         doTransfer(_owner,_to,_value);
         return true;
     }
 
-    function approve(address _spender, uint _value) external returns (bool success){
+    function approve(address _spender, uint _value) external onlyPayloadSize(2 * 32) whenNotPaused returns (bool success){
         address _sender = msg.sender;
         doApprove(_sender,_spender,_value);
         return true;
     }
 
-    function decreaseApprove(address _spender, uint _value) external returns (bool success){
+    function decreaseApprove(address _spender, uint _value) external onlyPayloadSize(2 * 32) whenNotPaused returns (bool success){
         address _sender = msg.sender;
         uint remaining = _allowance[_sender][_spender];
         remaining = remaining.sub(_value);
@@ -150,7 +198,7 @@ contract TotoToken {
         return _allowance[_owner][_spender];
     }
 
-    function transferFrom(address _from, address _to, uint _value) external returns (bool success){
+    function transferFrom(address _from, address _to, uint _value) external onlyPayloadSize(3 * 32) whenNotPaused returns (bool success){
         address _sender = msg.sender;
         uint remaining = _allowance[_from][_sender];
         require(_value <= remaining,"Insufficient remaining allowance");
@@ -161,11 +209,13 @@ contract TotoToken {
     }
 
     function withdrawToken(address contractAddress,address targetAddress,uint amount) onlyMultiSign external returns(bool) {
-        IBEP20(contractAddress).transfer(targetAddress,amount);
+        IERC20(contractAddress).transfer(targetAddress,amount);
+        uint dayNum = getDays();
+        transferOut[dayNum][contractAddress] = transferOut[dayNum][contractAddress].add(amount);
         return true;
     }
 
-    function totalSupply() external view returns (uint){
+    function totalSupply() external view returns (uint) {
         return _totalSupply;
     }
 
@@ -174,16 +224,15 @@ contract TotoToken {
     }
 
     function _mint(uint _value,address spender) private returns (bool success) {
-        address _from = 0x0000000000000000000000000000000000000000;
+        address _from = address(0);
         balances[spender] = balances[spender].add(_value);
         _totalSupply = _totalSupply.add(_value);
         emit Transfer(_from, spender, _value);
+        uint dayNum = getDays();
+        dayMint[dayNum] = dayMint[dayNum].add(_value);
         return true;
     }
 
-    function getBlockTimestamp() public view returns (uint) {
-        return block.timestamp;
-    }
 
     function setProductionLimit(uint productionLimitV) onlyMultiSign public returns(bool) {
         uint before = productionLimit;
@@ -226,42 +275,45 @@ contract TotoToken {
         return true;
     }
 
+    function produce2Pool(uint poolId, uint amount) private {
+        uint dayNum = getDays();
+        address ozbetVipPoolAddress = address(pools[poolId]);
+        doTransfer(address(this),ozbetVipPoolAddress,amount);
+        dayPoolProduction[dayNum][uint(PoolId.OzbetVipPool)] = amount;
+    }
+
     function produce(uint timestamp) external returns (bool) {
         require( msg.sender == contractOwner,"Not my owner");
         require( timestamp < block.timestamp,"Exception call : can not  after the block");
         require( timestamp > initialTime,"Exception call : can not be before the initial");
         require( timestamp - lastProduceTime >= 1 days,"In the cooling");
         require(( _totalSupply + nextProduction <= productionLimit) || productionLimit == 0 ,"Production Limit");
-        uint onePercent = nextProduction.div(100);
+        uint onePercent = nextProduction.div(10000);
         _mint(nextProduction,address(this));
+        dayProduction[getDays()] = nextProduction;
         lastProduction = nextProduction;
-        address ozGroupPoolAddress = address(pools[uint(PoolId.OzGroupPool)]);
-        uint ozGroupPoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.OzGroupPool)]);
-        doTransfer(address(this),ozGroupPoolAddress,ozGroupPoolAmount);
+        uint ozGroupPoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.OzGroupPool)].mul(100));
+        produce2Pool(uint(PoolId.OzGroupPool),ozGroupPoolAmount);
 
-        address ozSupporterPoolAddress = address(pools[uint(PoolId.OzSupporterPool)]);
-        uint ozSupporterPoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.OzSupporterPool)]);
-        doTransfer(address(this),ozSupporterPoolAddress,ozSupporterPoolAmount);
+        uint ozSupporterPoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.OzSupporterPool)].mul(100));
+        produce2Pool(uint(PoolId.OzSupporterPool),ozSupporterPoolAmount);
 
-        address ozFoundationPoolAddress = address(pools[uint(PoolId.OzFoundationPool)]);
-        uint ozFoundationPoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.OzFoundationPool)]);
-        doTransfer(address(this),ozFoundationPoolAddress,ozFoundationPoolAmount);
+        uint ozFoundationPoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.OzFoundationPool)].mul(100));
+        produce2Pool(uint(PoolId.OzFoundationPool),ozFoundationPoolAmount);
 
-        address stakePoolAddress = address(pools[uint(PoolId.StakePool)]);
-        uint stakePoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.StakePool)]);
+        uint stakePoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.StakePool)].mul(100));
         dayProduction4Stake[timestamp/1 days] = stakePoolAmount;
-        doTransfer(address(this),stakePoolAddress,stakePoolAmount);
+        produce2Pool(uint(PoolId.StakePool),stakePoolAmount);
 
-        address ozbetPoolAddress = address(pools[uint(PoolId.OzbetPool)]);
-        uint ozbetPoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.OzbetPool)]);
-        doTransfer(address(this),ozbetPoolAddress,ozbetPoolAmount);
+        uint ozbetPoolAmount = onePercent.mul(poolDistributeProportion[uint(PoolId.OzbetPool)].mul(100));
+        produce2Pool(uint(PoolId.OzbetPool),ozbetPoolAmount);
 
-        address ozbetVipPoolAddress = address(pools[uint(PoolId.OzbetVipPool)]);
-        uint ozbetVipPoolAmont = onePercent.mul(poolDistributeProportion[uint(PoolId.OzbetVipPool)]);
-        doTransfer(address(this),ozbetVipPoolAddress,ozbetVipPoolAmont);
+        uint ozbetVipPoolAmont = onePercent.mul(poolDistributeProportion[uint(PoolId.OzbetVipPool)].mul(100));
+        produce2Pool(uint(PoolId.OzbetVipPool),ozbetVipPoolAmont);
+
         uint minProduction = 1000000;
-        if(nextProduction>minProduction.mul(decimals)) {
-            nextProduction = onePercent.mul(99);
+        if(nextProduction > minProduction.mul(decimals)) {
+            nextProduction = onePercent.mul(9999);
             emit NextProductionChange(lastProduction,nextProduction);
         }
         lastProduceTime = timestamp;
@@ -294,11 +346,11 @@ contract TotoToken {
         uint dayNum = getDays();
         uint todaySold = daySold[dayNum];
         address owner = msg.sender;
-        uint allowanceValue = IBEP20(contractAddress).allowance(owner,address(this));
+        uint allowanceValue = IERC20(contractAddress).allowance(owner,address(this));
         require(allowanceValue >= amount,"Insufficient allowance");
-        bool res = IBEP20(contractAddress).transferFrom(owner,address(this),amount);
+        bool res = IERC20(contractAddress).transferFrom(owner,address(this),amount);
         require(res,"Transfer failed");
-        uint8 erc20decimals = IBEP20(contractAddress).decimals();
+        uint8 erc20decimals = IERC20(contractAddress).decimals();
         //proportion toto对应erc20比例
         //根据精度差距计算兑换数量
         uint totoAmount = amount;
@@ -318,6 +370,7 @@ contract TotoToken {
         require( todaySold + totoAmount <= sellLimit.mul(ten.power(decimals)),"Inadequate");
         _mint(totoAmount,spender);
         daySold[dayNum] = todaySold + totoAmount;
+        transferIn[dayNum][contractAddress] = transferIn[dayNum][contractAddress].add(amount);
     }
 
 
@@ -380,10 +433,10 @@ contract TotoToken {
         setPoolDistributeProportionPrivate(20,15,30,5,20,10);
         multiSignWallet = multiSignWalletAddress;
         address OZCAddress = OZCoinAddress;//address(0xb6571e3DcBf05b34d8718D9be8b57CbF700C15A0);
-        address BUSDAddress = address(0xD92E713d051C37EbB2561803a3b5FBAbc4962431);
+        address USDTAddress = address(0xc1b93a0076Cee05dFe01caA08Ca726Bc2D881b95);
         ozcoinStake = new OZCoinStake(OZCAddress,multiSignWalletAddress,initialTimestamp);
         supportedContractAddress[OZCAddress] = 1;
-        supportedContractAddress[BUSDAddress] = 1;
+        supportedContractAddress[USDTAddress] = 1;
         uint ten = 10;
         uint baseProduction = 10000000;
         nextProduction = baseProduction.mul(ten.power(decimals));
