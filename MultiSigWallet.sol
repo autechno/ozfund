@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.7;
 
 
@@ -32,6 +34,7 @@ contract MultiSignWallet {
         bytes data;
         uint8 transactionType;
         uint8 status;
+//        address[] confirms;
     }
 
     //超级管理员地址
@@ -39,12 +42,6 @@ contract MultiSignWallet {
 
     //管理员地址
     address[] admins = new address[](1);
-
-    //超级管理员索引映射
-    mapping(address => uint) public superAdminIndex;
-
-    //管理员索引映射
-    mapping(address => uint) public adminIndex;
 
     //管理员类型映射
     mapping(address => uint8) public adminType;
@@ -81,6 +78,8 @@ contract MultiSignWallet {
         bytes4 method = inputDataDecode(data);
         uint8 thisTransactionType = transactionFunctionType[method];
         require(thisTransactionType > 0,'Exception call');
+//        address[] memory _confirms;
+//        Transaction memory transaction = Transaction(targetAddress,data,thisTransactionType,uint8(Status.Pending),_confirms);
         Transaction memory transaction = Transaction(targetAddress,data,thisTransactionType,uint8(Status.Pending));
         uint thisTransactionId = transactionId;
         transactionId = transactionId.add(1);
@@ -107,20 +106,41 @@ contract MultiSignWallet {
         return transactionMap[viewTransactionId];
     }
 
+    //查看超管s
+    function viewSuperAdmins() view public returns (address[] memory) {
+        return superAdmins;
+    }
+    //查看普管s
+    function viewAdmins() view public returns (address[] memory) {
+        return admins;
+    }
+
     //确认事务
     function confirmTransaction(uint confirmTransactionId) public {
-        require(transactionConfirm[confirmTransactionId][msg.sender] == 0,'Repeat confirm');
-        transactionConfirm[confirmTransactionId][msg.sender] = 1;
         require(adminType[msg.sender] > 0,'Exception call');
+        require(transactionConfirm[confirmTransactionId][msg.sender] == 0,'Repeat confirm');
+        uint8 executeTransactionType = transactionMap[confirmTransactionId].transactionType;
+        uint superAdminConfirmCount = transactionSuperAdminConfirmCount[confirmTransactionId];
+        uint adminConfirmCount = transactionAdminConfirmCount[confirmTransactionId];
         if(adminType[msg.sender] == uint8(AdminType.Super)) {
-            transactionSuperAdminConfirmCount[confirmTransactionId] = transactionSuperAdminConfirmCount[confirmTransactionId].add(1);
+            require(superAdminConfirmCount < transactionMethodNeedSuperAdminConfirm[executeTransactionType],'Sign Number of SuperAdmin Limited.');
+            superAdminConfirmCount = superAdminConfirmCount.add(1);
         }
         if(adminType[msg.sender] == uint8(AdminType.Commmon)) {
-            transactionAdminConfirmCount[confirmTransactionId] = transactionAdminConfirmCount[confirmTransactionId].add(1);
+            require(adminConfirmCount < transactionMethodNeedAdminConfirm[executeTransactionType],'Sign Number of Admin Limited.');
+            adminConfirmCount = adminConfirmCount.add(1);
         }
-        uint8 executeTransactionType = transactionMap[confirmTransactionId].transactionType;
-        if(transactionAdminConfirmCount[confirmTransactionId]>=transactionMethodNeedAdminConfirm[executeTransactionType] && transactionSuperAdminConfirmCount[confirmTransactionId]>=transactionMethodNeedSuperAdminConfirm[executeTransactionType]) {
+        if(adminConfirmCount >= transactionMethodNeedAdminConfirm[executeTransactionType] && superAdminConfirmCount >= transactionMethodNeedSuperAdminConfirm[executeTransactionType]) {
             executeTransaction(confirmTransactionId);
+        }
+
+//        transactionMap[confirmTransactionId].confirms.push(msg.sender);
+        transactionConfirm[confirmTransactionId][msg.sender] = 1;
+        if(adminType[msg.sender] == uint8(AdminType.Super)) {
+            transactionSuperAdminConfirmCount[confirmTransactionId] = superAdminConfirmCount;
+        }
+        if(adminType[msg.sender] == uint8(AdminType.Commmon)) {
+            transactionAdminConfirmCount[confirmTransactionId] = adminConfirmCount;
         }
         emit ConfirmTransaction(msg.sender, confirmTransactionId);
     }
@@ -128,9 +148,12 @@ contract MultiSignWallet {
     //执行事务
     function executeTransaction(uint executeTransactionId) private {
         require(transactionMap[executeTransactionId].status==uint8(Status.Pending),'Repeat execute');
-        transactionMap[executeTransactionId].status=uint8(Status.Executed);
         (bool success, ) = transactionMap[executeTransactionId].targetAddress.call{value: 0 ether}(transactionMap[executeTransactionId].data);
+        //(bool success, bytes memory data) =
+        // 解析返回的数据
+        //(uint returnValue) = abi.decode(data, (uint));
         require(success,'Execution failed');
+        transactionMap[executeTransactionId].status=uint8(Status.Executed);
         emit ExecuteTransaction(executeTransactionId);
     }
 
@@ -144,18 +167,23 @@ contract MultiSignWallet {
     function doAddAdmin(address admin) private returns (bool) {
         require(admins.length <= 4,'Number of Admin Limit');
         admins.push(admin);
-        adminIndex[admin] = admins.length - 1;
         adminType[admin] = uint8(AdminType.Commmon);
         return true;
     }
 
     //移除管理员
     function removeAdmin(address admin) onlySelf public returns (bool) {
-        uint index = adminIndex[admin];
-        require(index>0,"Nonexistent");
         require((admins.length + superAdmins.length) > 4,"Number of Admin Limit");
-        admins[index] = admins[admins.length - 1];
-        admins.pop();
+        uint length = admins.length;
+        for (uint i = 0; i < length; i++) {
+            if (admins[i] == admin) {
+                // 替换要删除的元素与数组的最后一个元素
+                admins[i] = admins[length - 1];
+                // 删除数组的最后一个元素
+                admins.pop();
+                break; // 删除第一个匹配值后退出循环
+            }
+        }
         delete adminType[admin];
         return true;
     }
@@ -169,18 +197,23 @@ contract MultiSignWallet {
     function doAddSuperAdmin(address superAdmin) private returns (bool) {
         require(superAdmins.length <= 3,'Number of SuperAdmin Limit');
         superAdmins.push(superAdmin);
-        superAdminIndex[superAdmin] = superAdmins.length - 1;
         adminType[superAdmin] = uint8(AdminType.Super);
         return true;
     }
 
     //移除超级管理员
     function removeSuperAdmin(address superAdmin) onlySelf public returns (bool) {
-        uint index = superAdminIndex[superAdmin];
-        require(index > 0,"Nonexistent");
-        require((admins.length + superAdmins.length) > 4,"Number of Admin Limit");
-        superAdmins[index] = superAdmins[superAdmins.length - 1];
-        superAdmins.pop();
+        require((admins.length + superAdmins.length) > 4,"Number of SuperAdmin Limit");
+        uint length = superAdmins.length;
+        for (uint i = 0; i < length; i++) {
+            if (superAdmins[i] == superAdmin) {
+                // 替换要删除的元素与数组的最后一个元素
+                superAdmins[i] = superAdmins[length - 1];
+                // 删除数组的最后一个元素
+                superAdmins.pop();
+                break; // 删除第一个匹配值后退出循环
+            }
+        }
         delete adminType[superAdmin];
         return true;
     }
@@ -217,25 +250,27 @@ contract MultiSignWallet {
         configTransactionType(uint8(TransactionMethod.RollbackDiscard),0x6e593a3b,3,2);
 
 
-        configTransactionType(uint8(TransactionMethod.AddAdmin),0x70480275,0,2);
-        configTransactionType(uint8(TransactionMethod.RemoveAdmin),0x1785f53c,0,2);
-        configTransactionType(uint8(TransactionMethod.AddSuperAdmin),0xb3292ff0,2,1);
-        configTransactionType(uint8(TransactionMethod.RemoveSuperAdmin),0x4902e4aa,2,1);
+        configTransactionType(uint8(TransactionMethod.AddAdmin),0x70480275,2,1);
+        configTransactionType(uint8(TransactionMethod.RemoveAdmin),0x1785f53c,2,1);
+        configTransactionType(uint8(TransactionMethod.AddSuperAdmin),0xb3292ff0,3,1);
+        configTransactionType(uint8(TransactionMethod.RemoveSuperAdmin),0x4902e4aa,3,1);
 
 
-        superAdmins.push();
-        doAddSuperAdmin(0x54e5F9f440eD87546a8F34701a5d26919796e375);
-        doAddSuperAdmin(0x21923e1bc2529de136526fFb1e848531A6585EF4);
-        //doAddSuperAdmin(0x946E1e444B4de317E588750f0a0b3913fa8BCAaA);
-        //doAddSuperAdmin(0xa2B3510CA4aDe864Fc972a31ec4103D3E158a8c4);
+        //superAdmins.push();
+        //doAddSuperAdmin(0x4BC3e9F4Cdb7D7cEbe272701be953488b973d92b);
+        //doAddSuperAdmin(0x04292521CEB14473e20A82dF2132fD0D28962C15);
 
-        admins.push();
-        doAddAdmin(0x966F3dE8091d185F56B5706c2502c19d919CA21e);
-        doAddAdmin(0x64859F722426b250b75C3058A81891cF9F9840f1);
-        doAddAdmin(0xD6b0d9BB62605d71215643707B34482d03018f95);
-        //doAddAdmin(0x696B1E4e3ae3f8278936ea1bc58BcB4BE38A52a9);
-        //doAddAdmin(0xf8FB56125dD3509A53b991fB72DD60Be0A227BDF);
-        //doAddAdmin(0x52d13CBbfe2bc7fEF61e830d7ff9dfbe3EC7dDDd);
+        //admins.push();
+        //doAddAdmin(0xF09310a021784675f2936fC9eCc669b4baa2e1F3);
+        //doAddAdmin(0x64859F722426b250b75C3058A81891cF9F9840f1);
+        //doAddAdmin(0xcb43D8404a74da11857e2563477F888119c8a441);
+
+        doAddSuperAdmin(0xfb53889dbD54832e1Fe3DfA827e6Db5a2a6F5679);
+        doAddSuperAdmin(0x4BC3e9F4Cdb7D7cEbe272701be953488b973d92b);
+
+        doAddAdmin(0x55506E990179687eFf76F2FFeb1d066a2E915AB5);
+        doAddAdmin(0x04292521CEB14473e20A82dF2132fD0D28962C15);
+        doAddAdmin(0x91AB8F8264FB79c95FfCF14ce7F9789518308637);
 
         }
 
