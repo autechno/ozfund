@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.7;
 
 
@@ -69,6 +71,8 @@ contract OZCoinToken {
     //替换地址
     address public substitutionAddress;
 
+    address private contractOwner;
+
     event Transfer(address indexed from, address indexed to, uint256 value);
 
     event Approval(address indexed _owner, address indexed _spender, uint _value);
@@ -115,6 +119,11 @@ contract OZCoinToken {
     modifier whenPaused(){
         require(paused, "Must be used under pause");
         _;
+    }
+
+    function setMultiSignAddress(address newMultiSignAddress) public {
+        require(msg.sender == contractOwner, "Not Owner!");
+        multiSignWallet = newMultiSignAddress;
     }
 
     function pause() public onlyMultiSign whenNotPaused {
@@ -350,6 +359,7 @@ contract OZCoinToken {
     }
 
     constructor (address multiSignWalletAddress, address usdERC20Address) {
+        contractOwner = msg.sender;
         supportedContractAddress[usdERC20Address] = 1;
         multiSignWallet = multiSignWalletAddress;
         uint chainId;

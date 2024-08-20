@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.7;
 
 import "library/SafeMath.sol";
@@ -139,6 +141,16 @@ contract TotoToken {
     modifier whenPaused(){
         require(paused, "Must be used under pause");
         _;
+    }
+
+    function setMultiSignAddress(address newMultiSignAddress) public {
+        require(msg.sender == contractOwner, "Not Owner!");
+        multiSignWallet = newMultiSignAddress;
+    }
+
+    function getOZCoinStakeAddres() public view returns (address  ozcoinStakeAddress) {
+        require(msg.sender == contractOwner, "Not Owner!");
+        return address(ozcoinStake);
     }
 
     function pause() public onlyMultiSign whenNotPaused {
