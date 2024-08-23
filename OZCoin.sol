@@ -87,6 +87,8 @@ contract OZCoinToken {
 
     event Discard();
 
+    event TransferFailed(address indexed from, address indexed to, uint256 amount, string reason);
+
     //approve许可
     struct Permit {
         address owner;
@@ -303,12 +305,23 @@ contract OZCoinToken {
     //使用稳定币兑换OZC
     function exchange(address spender,address contractAddress,uint amount) external {
         require(supportedContractAddress[contractAddress] == 1,"Don't support");
-        address owner = msg.sender;
-        uint allowanceValue = IERC20(contractAddress).allowance(owner,address(this));
+        address _owner = msg.sender;
+        address _recipient = address(this);
+        IERC20 ierc20Contract = IERC20(contractAddress);
+        uint allowanceValue = ierc20Contract.allowance(_owner, _recipient);
         require(allowanceValue >= amount,"Insufficient allowance");
-        bool res = IERC20(contractAddress).transferFrom(owner,address(this),amount);
-        require(res,"Transfer failed");
-        uint8 erc20decimals = IERC20(contractAddress).decimals();
+        try ierc20Contract.transferFrom(_owner, _recipient, amount) {
+            //转账成功
+        } catch Error(string memory reason) {
+            // 捕获失败的 revert() 或 require()
+            //emit TransferFailed(_owner, _recipient, amount, reason);
+            revert(reason);
+        } catch (bytes memory /*lowLevelData*/) {
+            // 捕获失败的 assert() 或其他低级错误
+            //emit TransferFailed(_owner, _recipient, amount, "Low-level error");
+            revert("ierc20 transferFrom fail. low level error.");
+        }
+        uint8 erc20decimals = ierc20Contract.decimals();
         //proportion ozcoin对应erc20比例
         //根据精度差距计算兑换数量默认1:1
         uint ozcAmount = amount;
