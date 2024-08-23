@@ -249,21 +249,11 @@ contract MultiSignWallet {
         configTransactionType(uint8(TransactionMethod.Discard),0xd4881113,3,2);
         configTransactionType(uint8(TransactionMethod.RollbackDiscard),0x6e593a3b,3,2);
 
-
         configTransactionType(uint8(TransactionMethod.AddAdmin),0x70480275,2,1);
         configTransactionType(uint8(TransactionMethod.RemoveAdmin),0x1785f53c,2,1);
         configTransactionType(uint8(TransactionMethod.AddSuperAdmin),0xb3292ff0,3,1);
         configTransactionType(uint8(TransactionMethod.RemoveSuperAdmin),0x4902e4aa,3,1);
-
-
-        //superAdmins.push();
-        //doAddSuperAdmin(0x4BC3e9F4Cdb7D7cEbe272701be953488b973d92b);
-        //doAddSuperAdmin(0x04292521CEB14473e20A82dF2132fD0D28962C15);
-
-        //admins.push();
-        //doAddAdmin(0xF09310a021784675f2936fC9eCc669b4baa2e1F3);
-        //doAddAdmin(0x64859F722426b250b75C3058A81891cF9F9840f1);
-        //doAddAdmin(0xcb43D8404a74da11857e2563477F888119c8a441);
+        
 
         doAddSuperAdmin(0xfb53889dbD54832e1Fe3DfA827e6Db5a2a6F5679);
         doAddSuperAdmin(0x4BC3e9F4Cdb7D7cEbe272701be953488b973d92b);
