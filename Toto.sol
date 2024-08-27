@@ -355,7 +355,7 @@ contract TotoToken {
     function exchange(address spender,address contractAddress,uint amount) external {
         require(supportedContractAddress[contractAddress] == 1,"Don't support");
         require(allowExchange,"Not allow");
-        uint dayNum = getDays();
+//        uint dayNum = getDays();
 //        uint todaySold = daySold[dayNum];//去掉每日兑换限制 预售限制
         address owner = msg.sender;
         uint allowanceValue = IERC20(contractAddress).allowance(owner,address(this));
