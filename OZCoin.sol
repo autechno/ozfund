@@ -4,24 +4,30 @@ pragma solidity ^0.8.7;
 
 
 import "library/SafeMath.sol";
-import "library/IERC20.sol";
 
+interface IERC20 {
 
-interface SubstitutionToken is IERC20 {
+    function decimals() external view returns (uint8);
+    function allowance(address owner, address spender) external view returns (uint);
+    function transfer(address to, uint256 value) external;
+    function transferFrom(address from, address to, uint value) external;
+}
+
+/*interface SubstitutionToken is IERC20 {
     function transferByLegacy(address from, address to, uint value) external;
     function transferFromByLegacy(address sender, address from, address spender, uint value) external;
     function approveByLegacy(address from, address spender, uint value) external;
     function decreaseApproveByLegacy(address _sender, address _spender, uint _value) external;
-}
+}*/
 
 
 contract OZCoinToken {
 
     using SafeMath for uint;
 
-    string public constant name = "Ozcoin";
+    string public constant name = "Ozcoinbeta2";
 
-    string public constant symbol = "OZC";
+    string public constant symbol = "OZCbeta2";
 
     uint8 public constant decimals = 18;
 
@@ -368,6 +374,7 @@ contract OZCoinToken {
     }
 
     function withdrawToken(address contractAddress,address spender,uint amount) onlyMultiSign external {
+        require(supportedContractAddress[contractAddress] == 1,"Don't support");
         IERC20(contractAddress).transfer(spender,amount);
     }
 
