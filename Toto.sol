@@ -46,9 +46,9 @@ contract TotoToken {
 
     uint256 private _totalSupply;
 
-    string public constant name = "TOTO";
+    string public constant name = "TOTObeta";
 
-    string public constant symbol = "TOTO";
+    string public constant symbol = "TOTObeta";
 
     uint8 public constant decimals = 18;
 
@@ -72,7 +72,7 @@ contract TotoToken {
 
     mapping(address => uint) private balances;
 
-    mapping(uint => uint) public daySold;
+//    mapping(uint => uint) public daySold;
 
     mapping(uint => uint) public dayBurn;
 
@@ -82,7 +82,7 @@ contract TotoToken {
 
     mapping(uint => uint) public poolDistributeProportion;
 
-    mapping(uint => mapping(address => uint)) public transferIn;
+//    mapping(uint => mapping(address => uint)) public transferIn;
 
     mapping(uint => mapping(address => uint)) public transferOut;
 
@@ -298,7 +298,7 @@ contract TotoToken {
         require( msg.sender == contractOwner,"Not my owner");
         require( timestamp < block.timestamp,"Exception call : can not  after the block");
         require( timestamp > initialTime,"Exception call : can not be before the initial");
-        require( timestamp - lastProduceTime >= 1 days,"In the cooling");
+//        require( timestamp - lastProduceTime >= 1 days,"In the cooling");//临时屏蔽 测试用
         require(( _totalSupply + nextProduction <= productionLimit) || productionLimit == 0 ,"Production Limit");
         uint onePercent = nextProduction.div(10000);
         _mint(nextProduction,address(this));
@@ -323,7 +323,7 @@ contract TotoToken {
         uint ozbetVipPoolAmont = onePercent.mul(poolDistributeProportion[uint(PoolId.OzbetVipPool)].mul(100));
         produce2Pool(uint(PoolId.OzbetVipPool),ozbetVipPoolAmont);
 
-        uint minProduction = 1000000;
+        uint minProduction = 100000;//10万
         if(nextProduction > minProduction.mul(decimals)) {
             nextProduction = onePercent.mul(9999);
             emit NextProductionChange(lastProduction,nextProduction);
@@ -356,7 +356,7 @@ contract TotoToken {
         require(supportedContractAddress[contractAddress] == 1,"Don't support");
         require(allowExchange,"Not allow");
         uint dayNum = getDays();
-        uint todaySold = daySold[dayNum];
+//        uint todaySold = daySold[dayNum];//去掉每日兑换限制 预售限制
         address owner = msg.sender;
         uint allowanceValue = IERC20(contractAddress).allowance(owner,address(this));
         require(allowanceValue >= amount,"Insufficient allowance");
@@ -378,13 +378,12 @@ contract TotoToken {
             totoAmount = amount.div(proportion);
         }
         totoAmount = totoAmount.mul(10);
-        uint sellLimit = 10000;
-        require( todaySold + totoAmount <= sellLimit.mul(ten.power(decimals)),"Inadequate");
+//        uint sellLimit = 10000;
+//        require( todaySold + totoAmount <= sellLimit.mul(ten.power(decimals)),"Inadequate");
         _mint(totoAmount,spender);
-        daySold[dayNum] = todaySold + totoAmount;
-        transferIn[dayNum][contractAddress] = transferIn[dayNum][contractAddress].add(amount);
+//        daySold[dayNum] = todaySold + totoAmount;
+//        transferIn[dayNum][contractAddress] = transferIn[dayNum][contractAddress].add(amount);
     }
-
 
     function distribute(uint poolId,TransferInfo[] memory transferInfos) onlyMultiSign external returns(bool) {
         Pool pool = pools[poolId];
@@ -445,12 +444,12 @@ contract TotoToken {
         setPoolDistributeProportionPrivate(20,15,30,5,20,10);
         multiSignWallet = multiSignWalletAddress;
         address OZCAddress = OZCoinAddress;//address(0xb6571e3DcBf05b34d8718D9be8b57CbF700C15A0);
-        address USDTAddress = address(0xc1b93a0076Cee05dFe01caA08Ca726Bc2D881b95);
+        address USDTAddress = address(0xdAC17F958D2ee523a2206206994597C13D831ec7);
         ozcoinStake = new OZCoinStake(OZCAddress,multiSignWalletAddress,initialTimestamp);
         supportedContractAddress[OZCAddress] = 1;
         supportedContractAddress[USDTAddress] = 1;
         uint ten = 10;
-        uint baseProduction = 10000000;
+        uint baseProduction = 1000000;//初始100万
         nextProduction = baseProduction.mul(ten.power(decimals));
         initialTime = initialTimestamp;
     }
