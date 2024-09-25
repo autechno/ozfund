@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.7;
+pragma solidity ^0.8.20;
 
 
-import "library/SafeMath.sol";
+import "./library/SafeMath.sol";
+import {Common} from "./library/Common.sol";
 
-interface IERC20 {
+interface IUSDT {
 
     function decimals() external view returns (uint8);
     function allowance(address owner, address spender) external view returns (uint);
@@ -13,21 +14,13 @@ interface IERC20 {
     function transferFrom(address from, address to, uint value) external;
 }
 
-/*interface SubstitutionToken is IERC20 {
-    function transferByLegacy(address from, address to, uint value) external;
-    function transferFromByLegacy(address sender, address from, address spender, uint value) external;
-    function approveByLegacy(address from, address spender, uint value) external;
-    function decreaseApproveByLegacy(address _sender, address _spender, uint _value) external;
-}*/
-
-
 contract OZCoinToken {
 
     using SafeMath for uint;
 
-    string public constant name = "Ozcoinbeta2";
+    string public constant name = "OZCoin";
 
-    string public constant symbol = "OZCbeta2";
+    string public constant symbol = "OZC";
 
     uint8 public constant decimals = 18;
 
@@ -52,19 +45,19 @@ contract OZCoinToken {
     mapping(address => uint) public nonces;
 
     //链上日-生产
-    mapping(uint => uint) public dayMint;
+    //mapping(uint => uint) public dayMint;
 
     //链上日-销毁
-    mapping(uint => uint) public dayBurn;
+    //mapping(uint => uint) public dayBurn;
 
     //链上日-售出
-    mapping(uint => uint) public daySold;
+    //mapping(uint => uint) public daySold;
 
     //链上日-转入
-    mapping(uint => mapping(address => uint)) public transferIn;
+    //mapping(uint => mapping(address => uint)) public transferIn;
 
     //链上日-转出
-    mapping(uint => mapping(address => uint)) public transferOut;
+    //mapping(uint => mapping(address => uint)) public transferOut;
 
     //域分隔符 用于验证permitApprove
     bytes32 private DOMAIN_SEPARATOR;
@@ -73,9 +66,6 @@ contract OZCoinToken {
     bool public discarded = false;
 
     bool public paused = false;
-
-    //替换地址
-    address public substitutionAddress;
 
     address private contractOwner;
 
@@ -95,14 +85,6 @@ contract OZCoinToken {
 
     event TransferFailed(address indexed from, address indexed to, uint256 amount, string reason);
 
-    //approve许可
-    struct Permit {
-        address owner;
-        address spender;
-        uint256 value;
-        uint256 nonce;
-        uint256 deadline;
-    }
 
     modifier onlyPayloadSize(uint size){
         require(!(msg.data.length < size+4), "Invalid short address");
@@ -142,24 +124,6 @@ contract OZCoinToken {
     function unpause() public onlyMultiSign whenPaused{
         paused = false;
         emit Unpause();
-    }
-
-
-    function hashPermit(Permit memory permit) private view returns (bytes32){
-        return keccak256(
-            abi.encodePacked(
-                '\x19\x01',
-                DOMAIN_SEPARATOR,
-                keccak256(abi.encode(
-                    keccak256('Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)'),
-                    permit.owner,
-                    permit.spender,
-                    permit.value,
-                    permit.nonce,
-                    permit.deadline
-                ))
-            )
-        );
     }
 
     function getDays() public view returns (uint) {
@@ -211,8 +175,8 @@ contract OZCoinToken {
         balances[spender] = balances[spender].add(_value);
         _totalSupply = _totalSupply.add(_value);
         emit Transfer(_from, spender, _value);
-        uint dayNum = getDays();
-        dayMint[dayNum] = dayMint[dayNum].add(_value);
+        //uint dayNum = getDays();
+        //dayMint[dayNum] = dayMint[dayNum].add(_value);
         return true;
     }
 
@@ -235,9 +199,9 @@ contract OZCoinToken {
         balances[_to] = balances[_to].add(_value);
         emit Transfer(_from, _to, _value);
         if(_to == 0x0000000000000000000000000000000000000000) {
-            uint dayNum = getDays();
             _totalSupply = _totalSupply.sub(_value);
-            dayBurn[dayNum] = dayBurn[dayNum].add(_value);
+            //uint dayNum = getDays();
+            //dayBurn[dayNum] = dayBurn[dayNum].add(_value);
         }
     }
 
@@ -289,13 +253,35 @@ contract OZCoinToken {
         doTransfer(_from, _to, _value);
     }
 
-    function permitApprove(Permit memory permit, uint8 v, bytes32 r, bytes32 s) external {
+    function hashPermit(address to, uint amount, uint nonce, uint deadline) external view returns (bytes32){
+        Common.Permit memory permit = Common.Permit(msg.sender,to,amount,nonce,deadline);
+        return hashPermit(permit);
+    }
+    function hashPermit(Common.Permit memory permit) private view returns (bytes32){
+        return keccak256(
+            abi.encodePacked(
+                '\x19\x01',
+                DOMAIN_SEPARATOR,
+                keccak256(abi.encode(
+                    keccak256('Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)'),
+                    permit.owner,
+                    permit.spender,
+                    permit.value,
+                    permit.nonce,
+                    permit.deadline
+                ))
+            )
+        );
+    }
+
+    function permitApprove(Common.Permit memory permit, uint8 v, bytes32 r, bytes32 s) external {
         require(permit.deadline >= block.timestamp, "Expired");
-        require(permit.nonce == nonces[permit.owner] ++, "Invalid Nonce");
+        require(permit.nonce > nonces[permit.owner], "Invalid Nonce");
         bytes32 digest = hashPermit(permit);
         address recoveredAddress = ecrecover(digest, v, r, s);
         require(recoveredAddress != address(0) && recoveredAddress == permit.owner, "Invalid Signature");
         doApprove(permit.owner, permit.spender, permit.value);
+        delete nonces[permit.owner];
     }
 
     function allowSupportedAddress(address contractAddress) onlyMultiSign external returns(bool) {
@@ -313,7 +299,7 @@ contract OZCoinToken {
         require(supportedContractAddress[contractAddress] == 1,"Don't support");
         address _owner = msg.sender;
         address _recipient = address(this);
-        IERC20 ierc20Contract = IERC20(contractAddress);
+        IUSDT ierc20Contract = IUSDT(contractAddress);
         uint allowanceValue = ierc20Contract.allowance(_owner, _recipient);
         require(allowanceValue >= amount,"Insufficient allowance");
         try ierc20Contract.transferFrom(_owner, _recipient, amount) {
@@ -342,17 +328,17 @@ contract OZCoinToken {
             uint proportion = ten.power(decimalsDifference);
             ozcAmount = amount.div(proportion);
         }
-        uint dayNum = getDays();
-        transferIn[dayNum][contractAddress] = transferIn[dayNum][contractAddress].add(amount);
+        //uint dayNum = getDays();
+        //transferIn[dayNum][contractAddress] = transferIn[dayNum][contractAddress].add(amount);
         _mint(ozcAmount,spender);
-        daySold[dayNum] = daySold[dayNum] + ozcAmount;
+        //daySold[dayNum] = daySold[dayNum] + ozcAmount;
     }
 
     //使用OZC兑换稳定币
     function reverseExchange(address spender,address contractAddress,uint amount) external {
         require(supportedContractAddress[contractAddress] == 1,"Don't support");
         address owner = msg.sender;
-        uint8 erc20decimals = IERC20(contractAddress).decimals();
+        uint8 erc20decimals = IUSDT(contractAddress).decimals();
         //proportion ozcoin对应erc20比例
         //根据精度差距计算兑换数量默认1:1
         uint exAmount = amount;
@@ -367,20 +353,20 @@ contract OZCoinToken {
             uint proportion = ten.power(decimalsDifference);
             exAmount = amount.mul(proportion);
         }
-        uint dayNum = getDays();
-        transferOut[dayNum][contractAddress] = transferOut[dayNum][contractAddress].add(exAmount);
+        //uint dayNum = getDays();
+        //transferOut[dayNum][contractAddress] = transferOut[dayNum][contractAddress].add(exAmount);
         burn(owner,amount);
-        IERC20(contractAddress).transfer(spender,exAmount);
+        IUSDT(contractAddress).transfer(spender,exAmount);
     }
 
     function withdrawToken(address contractAddress,address spender,uint amount) onlyMultiSign external {
         require(supportedContractAddress[contractAddress] == 1,"Don't support");
-        IERC20(contractAddress).transfer(spender,amount);
+        IUSDT(contractAddress).transfer(spender,amount);
     }
 
-    constructor (address multiSignWalletAddress, address usdERC20Address) {
+    constructor (address multiSignWalletAddress, address usdtERC20Address) {
         contractOwner = msg.sender;
-        supportedContractAddress[usdERC20Address] = 1;
+        supportedContractAddress[usdtERC20Address] = 1;
         multiSignWallet = multiSignWalletAddress;
         uint chainId;
         assembly {
